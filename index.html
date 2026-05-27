@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chess Player Manager</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; max-width: 1100px; margin: auto; padding: 24px 20px; background: #fff; color: #111; }
+  h1 { font-size: 26px; font-weight: 600; margin-bottom: 6px; }
+  h2 { font-size: 16px; font-weight: 500; margin: 24px 0 10px; color: #333; }
+  p.sub { font-size: 13px; color: #666; margin-bottom: 4px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  input, select, button { padding: 7px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; outline: none; }
+  input:focus, select:focus { border-color: #555; }
+  button { background: #111; color: #fff; border-color: #111; cursor: pointer; }
+  button:hover { background: #333; }
+  button.secondary { background: #fff; color: #111; border: 1px solid #ccc; }
+  button.secondary:hover { background: #f5f5f5; }
+  button.danger { background: #fff; color: #c00; border: 1px solid #faa; }
+  button.danger:hover { background: #fff0f0; }
+  code { font-family: monospace; font-size: 13px; background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+  th, td { border: 1px solid #e0e0e0; padding: 9px 12px; text-align: left; }
+  th { background: #f9f9f9; font-weight: 500; color: #333; cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { background: #f0f0f0; }
+  tr:hover td { background: #fafafa; }
+  .sort-icon { font-size: 11px; margin-left: 4px; color: #888; }
+  .badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #e8f5e9; color: #2e7d32; font-weight: 500; }
+  .stats { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+  .stat { background: #f5f5f5; border-radius: 8px; padding: 10px 18px; min-width: 120px; }
+  .stat-label { font-size: 12px; color: #666; }
+  .stat-value { font-size: 22px; font-weight: 600; }
+  #msg { display: none; margin: 10px 0; padding: 8px 14px; border-radius: 6px; font-size: 13px; }
+  #msg.ok { background: #e8f5e9; color: #2e7d32; }
+  #msg.err { background: #ffebee; color: #c62828; }
+  .edit-input { padding: 4px 8px; font-size: 13px; border: 1px solid #aaa; border-radius: 4px; width: 100%; }
+  .actions { display: flex; gap: 6px; }
+  #search { min-width: 200px; }
+  @media (max-width: 600px) { .stats { flex-direction: column; } }
+</style>
+</head>
+<body>
+
+<h1>Chess Database</h1>
+<p class="sub">Данные хранятся в браузере. Работает без сервера — можно разместить на GitHub Pages.</p>
+
+<div id="msg"></div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-label">Игроков</div><div class="stat-value" id="stat-total">0</div></div>
+  <div class="stat"><div class="stat-label">Средний рейтинг</div><div class="stat-value" id="stat-avg">—</div></div>
+  <div class="stat"><div class="stat-label">Лучший рейтинг</div><div class="stat-value" id="stat-max">—</div></div>
+  <div class="stat"><div class="stat-label">Стран</div><div class="stat-value" id="stat-countries">0</div></div>
+</div>
+
+<h2>Загрузить CSV</h2>
+<p class="sub">Формат: <code>name,country,birth_year,rating</code></p>
+<div class="row">
+  <input type="file" id="csv-file" accept=".csv">
+  <button onclick="loadCSV()">Загрузить</button>
+  <button class="secondary" onclick="downloadTemplate()">Скачать шаблон CSV</button>
+</div>
+
+<h2>Добавить вручную</h2>
+<div class="row">
+  <input id="in-name" placeholder="Имя" style="min-width:160px">
+  <input id="in-country" placeholder="Страна" style="min-width:120px">
+  <input id="in-year" placeholder="Год рождения" type="number" style="width:130px">
+  <input id="in-rating" placeholder="Рейтинг" type="number" style="width:100px">
+  <button onclick="addPlayer()">Добавить</button>
+</div>
+
+<h2>Таблица игроков</h2>
+<div class="row">
+  <input id="search" placeholder="Поиск по имени или стране..." oninput="render()">
+  <button class="danger" onclick="clearAll()">Очистить всё</button>
+  <button class="secondary" onclick="exportCSV()">Экспорт CSV</button>
+</div>
+
+<table id="table">
+  <thead>
+    <tr>
+      <th onclick="sortBy('name')">Имя <span class="sort-icon" id="sort-name"></span></th>
+      <th onclick="sortBy('country')">Страна <span class="sort-icon" id="sort-country"></span></th>
+      <th onclick="sortBy('birth_year')">Год <span class="sort-icon" id="sort-birth_year"></span></th>
+      <th onclick="sortBy('rating')">Рейтинг <span class="sort-icon" id="sort-rating"></span></th>
+      <th>Действия</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+<p style="font-size:12px;color:#999;margin-top:8px" id="count-label"></p>
+
+<script>
+const STORAGE_KEY = 'chess_players';
+let players = [];
+let sortCol = 'rating';
+let sortDir = 'desc';
+let editId = null;
+
+function load() {
+  try { players = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { players = []; }
+  if (players.length === 0) {
+    players = [
+      {id:1, name:'Magnus Carlsen', country:'Norway', birth_year:1990, rating:2839},
+      {id:2, name:'Hikaru Nakamura', country:'USA', birth_year:1987, rating:2800},
+      {id:3, name:'Fabiano Caruana', country:'USA', birth_year:1992, rating:2805},
+      {id:4, name:'Ding Liren', country:'China', birth_year:1992, rating:2762},
+    ];
+    save();
+  }
+}
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(players));
+}
+
+function nextId() {
+  return players.length ? Math.max(...players.map(p => p.id)) + 1 : 1;
+}
+
+function msg(text, type) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = type;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 3000);
+}
+
+function updateStats() {
+  const total = players.length;
+  const ratings = players.map(p => p.rating).filter(Boolean);
+  const avg = ratings.length ? Math.round(ratings.reduce((a,b)=>a+b,0)/ratings.length) : '—';
+  const max = ratings.length ? Math.max(...ratings) : '—';
+  const countries = new Set(players.map(p=>p.country).filter(Boolean)).size;
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-avg').textContent = avg;
+  document.getElementById('stat-max').textContent = max;
+  document.getElementById('stat-countries').textContent = countries;
+}
+
+function sortBy(col) {
+  if (sortCol === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  else { sortCol = col; sortDir = col === 'name' || col === 'country' ? 'asc' : 'desc'; }
+  render();
+}
+
+function render() {
+  const q = document.getElementById('search').value.toLowerCase();
+  let rows = players.filter(p =>
+    (!q || p.name.toLowerCase().includes(q) || (p.country||'').toLowerCase().includes(q))
+  );
+
+  rows.sort((a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    if (va < vb) return sortDir === 'asc' ? -1 : 1;
+    if (va > vb) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  ['name','country','birth_year','rating'].forEach(c => {
+    const el = document.getElementById('sort-'+c);
+    if (el) el.textContent = c === sortCol ? (sortDir === 'asc' ? '▲' : '▼') : '';
+  });
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+  rows.forEach(p => {
+    const tr = document.createElement('tr');
+    if (editId === p.id) {
+      tr.innerHTML = `
+        <td><input class="edit-input" id="e-name" value="${esc(p.name)}"></td>
+        <td><input class="edit-input" id="e-country" value="${esc(p.country||'')}"></td>
+        <td><input class="edit-input" id="e-year" value="${p.birth_year||''}" type="number"></td>
+        <td><input class="edit-input" id="e-rating" value="${p.rating||''}" type="number"></td>
+        <td class="actions">
+          <button onclick="saveEdit(${p.id})">Сохранить</button>
+          <button class="secondary" onclick="cancelEdit()">Отмена</button>
+        </td>`;
+    } else {
+      tr.innerHTML = `
+        <td><b>${esc(p.name)}</b></td>
+        <td>${esc(p.country||'')}</td>
+        <td>${p.birth_year||''}</td>
+        <td><span class="badge">${p.rating||''}</span></td>
+        <td class="actions">
+          <button class="secondary" onclick="startEdit(${p.id})">Ред.</button>
+          <button class="danger" onclick="deletePlayer(${p.id})">✕</button>
+        </td>`;
+    }
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('count-label').textContent =
+    rows.length < players.length ? `Показано ${rows.length} из ${players.length}` : `Всего: ${players.length}`;
+  updateStats();
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function addPlayer() {
+  const name = document.getElementById('in-name').value.trim();
+  const country = document.getElementById('in-country').value.trim();
+  const year = parseInt(document.getElementById('in-year').value);
+  const rating = parseInt(document.getElementById('in-rating').value);
+  if (!name) { msg('Введите имя игрока', 'err'); return; }
+  players.push({id: nextId(), name, country, birth_year: year||null, rating: rating||null});
+  save(); render();
+  ['in-name','in-country','in-year','in-rating'].forEach(id => document.getElementById(id).value = '');
+  msg('Игрок добавлен', 'ok');
+}
+
+function deletePlayer(id) {
+  players = players.filter(p => p.id !== id);
+  save(); render();
+}
+
+function startEdit(id) { editId = id; render(); }
+function cancelEdit() { editId = null; render(); }
+
+function saveEdit(id) {
+  const p = players.find(p => p.id === id);
+  if (!p) return;
+  p.name = document.getElementById('e-name').value.trim() || p.name;
+  p.country = document.getElementById('e-country').value.trim();
+  p.birth_year = parseInt(document.getElementById('e-year').value) || null;
+  p.rating = parseInt(document.getElementById('e-rating').value) || null;
+  editId = null;
+  save(); render();
+  msg('Сохранено', 'ok');
+}
+
+function loadCSV() {
+  const file = document.getElementById('csv-file').files[0];
+  if (!file) { msg('Выберите CSV файл', 'err'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const lines = e.target.result.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) { msg('Файл пустой', 'err'); return; }
+    const header = lines[0].toLowerCase().split(',').map(h => h.trim());
+    const ni = header.indexOf('name'), ci = header.indexOf('country');
+    const yi = header.indexOf('birth_year'), ri = header.indexOf('rating');
+    if (ni === -1) { msg('Нет колонки name в CSV', 'err'); return; }
+    let added = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map(c => c.trim());
+      const name = cols[ni];
+      if (!name) continue;
+      players.push({
+        id: nextId(),
+        name,
+        country: ci >= 0 ? cols[ci] : '',
+        birth_year: yi >= 0 ? parseInt(cols[yi]) || null : null,
+        rating: ri >= 0 ? parseInt(cols[ri]) || null : null,
+      });
+      added++;
+    }
+    save(); render();
+    msg(`Добавлено ${added} игроков`, 'ok');
+    document.getElementById('csv-file').value = '';
+  };
+  reader.readAsText(file);
+}
+
+function exportCSV() {
+  const header = 'name,country,birth_year,rating';
+  const rows = players.map(p => [p.name, p.country||'', p.birth_year||'', p.rating||''].join(','));
+  const blob = new Blob([header + '\n' + rows.join('\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'chess_players.csv';
+  a.click();
+}
+
+function downloadTemplate() {
+  const content = 'name,country,birth_year,rating\nMagnus Carlsen,Norway,1990,2839\nHikaru Nakamura,USA,1987,2800';
+  const blob = new Blob([content], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'template.csv';
+  a.click();
+}
+
+function clearAll() {
+  if (confirm('Удалить всех игроков?')) {
+    players = [];
+    save(); render();
+    msg('База очищена', 'ok');
+  }
+}
+
+load();
+render();
+</script>
+</body>
+</html>
